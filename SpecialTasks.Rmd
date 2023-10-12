@@ -1,0 +1,209 @@
+---
+title: "Special Tasks"
+author: "Prakhar"
+date: '2023-09-30'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(plotly)
+library(shiny)
+library(miniUI)
+library(dplyr)
+library(readr)
+library(tidytext)
+library(visNetwork)
+source("phraseNet.R")
+```
+
+## Special Task 1
+
+
+## Special Task 2
+```{r}
+# special Task 2
+brush_trace_lines <- function(){
+  # create user interface with one plot and two buttons
+  ui <- miniPage(gadgetTitleBar("Brush Trace Lines in the Parallel Coordinates Plot of mtcars dataset with the selected colors"),
+                 miniContentPanel(
+                   selectInput(inputId = "picked_color",
+                               label = "pick a color",
+                               choices = list(red = 1, green = 2, blue = 3, orange = 4)),
+                   actionButton(inputId = "clear_sel", label = "Clear Selected"),
+                   actionButton(inputId = "clear_all", label = "Clear All"),
+                   plotlyOutput(outputId = "parcoords"),
+                 )
+  )
+  
+  server <- function(input, output) {
+    # use mtcars data and set ID column
+    mtcars2 <- mtcars
+    # mtcars2$ID <- 1:nrow(mtcars)
+    # sequence of colors selected by the user
+    color_seq <- reactiveVal(0)
+    # color of individual observations
+    brushed_colors <- reactiveVal(rep(0, nrow(mtcars)))
+    # observe the event for clear selected button and react accordingly
+    observeEvent(input$clear_sel, {
+      n_colors <- length(color_seq())
+      cur_color <- color_seq()[n_colors]
+      bc <- brushed_colors()
+      # grey out the current color
+      bc[bc == cur_color] <- 0
+      # update the brushed colors
+      brushed_colors(bc)
+      # update the color sequence
+      if(n_colors > 1)
+        color_seq(color_seq()[1:(n_colors-1)])
+    })
+    # observe the event for clear all button and react accordingly
+    observeEvent(input$clear_all, {
+      # update the color sequence
+      color_seq(0)
+      # update the brushed colors
+      brushed_colors(rep(0, nrow(mtcars)))
+    })
+    # render the parallel coordinates plot and register the restyle event
+    output$parcoords <- renderPlotly({
+      # create dimensions list
+      dims <- Map(function(x, y) {
+        list(values = x, range = range(x), label = y)
+      }, mtcars2, names(mtcars2), USE.NAMES = FALSE)
+      # plot the parallel coordinates
+      plot_ly(type = 'parcoords', dimensions = dims[1:11], source = "pcoords",
+              line = list(color = ~brushed_colors(),
+                          colorscale = list(c(0, "grey"),
+                                            c(0.25, "red"),
+                                            c(0.5, "green"),
+                                            c(0.75, "blue"),
+                                            c(1, "orange")),
+                          cmin = 0,
+                          cmax = 4
+              )
+      ) %>% 
+        layout(margin = list(r = 30)) %>%
+        event_register("plotly_restyle")
+    })
+    # observe the brushing event and redraw the plot with selected color
+    observeEvent(event_data("plotly_restyle", source = "pcoords"), {
+      d <- event_data("plotly_restyle", source = "pcoords")
+      # what is the relevant dimension (i.e. variable)?
+      dimen <- as.numeric(stringr::str_extract(names(d[[1]]), "[0-9]+"))
+      # If the restyle isn't related to a dimension, exit early.
+      if (!length(dimen)) return()
+      # careful of the indexing in JS (0) versus R (1)!
+      dim_name <- names(mtcars2)[[dimen + 1]]
+      # get the constraint range
+      rng <- d[[1]][[1]]
+      # get the IDs from the dimension and constraint range
+      IDs <- which(between(mtcars2[[dim_name]], rng[1], rng[2]))
+      # use the IDs to change the brushed colors and the color sequence
+      color_seq(c(color_seq()[color_seq() != input$picked_color], input$picked_color))
+      bc <- brushed_colors()
+      bc[IDs] <- input$picked_color
+      brushed_colors(bc)
+    })
+    # observe the done button to stop the gadget and return the colors of each 
+    # observation
+    observeEvent(input$done, {
+      color <- as.numeric(brushed_colors()) + 1
+      color <- sapply(color, function(x) {
+        switch(x,
+               "grey",
+               "red",
+               "green",
+               "blue",
+               "orange")
+      })
+      mtcars2$color <- color
+      # print the data frame with colors
+      print(mtcars2)
+      # return the data frame with colors
+      stopApp(mtcars2)
+    })
+  }
+
+  runGadget(ui, server)
+}
+# run the gadget
+Result <- brush_trace_lines()
+```
+
+## Special Task 3
+```{r}
+# Special Task 3
+ui <- fluidPage(
+  
+  sidebarLayout(
+    
+    sidebarPanel(
+      # select a file to read
+      fileInput(inputId = "file", label = "select a text file", accept = "text/plain"),
+      # input the connectors
+      textInput(inputId = "connectors", label = "Enter comma separated list of connectors")
+    ),
+    
+    mainPanel(
+      # output the phrase net
+      visNetworkOutput(outputId = "phrasenet"),
+      # text output for the sentences containing the selected edge
+      htmlOutput(outputId = "text")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  text <- reactiveVal()
+  # observe the file input and change the text accordingly
+  observeEvent(input$file, {
+    text(read_lines(input$file$datapath))
+  })
+  
+  connectors <- reactiveVal()
+  # observe the connectors input and change the connectors accordingly
+  observeEvent(input$connectors, {
+    connector_text <- input$connectors
+    # vector of connector words
+    connector_words <- strsplit(connector_text, ",")[[1]]
+    # clean the connector words by stripping the white space
+    connector_words <- gsub(" ", "", connector_words)
+    connectors(connector_words)
+  })
+  
+  # edge data obtained from phraseNet function
+  edge_data <- reactiveVal()
+  
+  # output the phrasenet
+  output$phrasenet <- renderVisNetwork({
+    # get the nodes and edges for the graph, using the text and connectors
+    graph_data <- phraseNet(text(), connectors())
+    # change the edge data for use in text output
+    edge_data(graph_data$edges)
+    # draw the graph and associate a click event with the edges
+    visNetwork(graph_data$nodes, graph_data$edges) %>%
+      visEvents(selectEdge = "function(edges) {
+        Shiny.onInputChange('current_edge_id', edges);
+      ;}")
+  })
+  
+  # output the relevant lines using the text output
+  output$text <- renderUI({
+    # get the id of the selected edge
+    edge_id <- input$current_edge_id$edges[[1]]
+    # get the from and to words of the selected edge
+    edge <- edge_data() %>% 
+      filter(id == edge_id)
+    from <- edge$from
+    to <- edge$to
+    # get the word combinations using the from, to and connectors
+    word_combinations <- paste(from, connectors(), to)
+    # get the output lines for each word combination
+    HTML(paste(unlist(sapply(word_combinations, grep, x = text(), ignore.case = TRUE, value = TRUE)), collapse = "<br>"))
+  })
+}
+
+# Run the application 
+shinyApp(ui, server)
+```
