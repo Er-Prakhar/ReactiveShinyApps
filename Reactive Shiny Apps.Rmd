@@ -1,5 +1,5 @@
 ---
-title: "Special Tasks"
+title: "Reactive Shiny Apps"
 author: "Prakhar"
 date: '2023-09-30'
 output: html_document
@@ -17,10 +17,9 @@ library(visNetwork)
 source("phraseNet.R")
 ```
 
-## Special Task 1
+## Introducing trace line colors in plotly.js parallel coordinates plot
 
-
-## Special Task 2
+Parallel coordinate plots in plotly provide the functionality to select trace lines by brushing along the parallel coordinate axes. However all the selected clusters have the same color making it difficult to differentiate between clusters. The following Shiny gadget makes use of reactivity in Shiny to enable color selection prior to brusing the trace lines, and makes those colors persist in the subsequent brushes making it much more easier to identify different clusters in the data. We can also remove the colors of the clusters in the reverse order of cluster selection to account for erroneous brushing by the user or to enable corrections in the cluster selection.
 ```{r}
 # special Task 2
 brush_trace_lines <- function(){
@@ -130,7 +129,12 @@ brush_trace_lines <- function(){
 Result <- brush_trace_lines()
 ```
 
-## Special Task 3
+## Phrase Networks
+
+This reactive Shiny app reads any user input text file and takes a list of connector words, then displays a graph of all the words in the texts connected by those connector words referred to as a phrase net. Essentially displaying all the trigrams in the text in which the middle word is one of the connector words input by the user. The nodes are also colored by their occurrence frequency and the positions in the trigrams, with words most commonly occurring as the first word (source node) in the trigram colored in darker shades of blue and the one most commonly occurring as the last word (destination node) colored in lighter shades. This helps us get an overview of the text by analyzing the different connections in the text and their relative frequencies. 
+Further, selecting any edge of the graph displays all the sentences in which the connection appears, which helps to better understand the context in which the phrases are used to get a better understanding of the text.
+
+A visually more impressive version of this app is also hosted as a shiny dashboard here: https://89lvi7-prakhar.shinyapps.io/PhraseNetworkApp/
 ```{r}
 # Special Task 3
 ui <- fluidPage(
@@ -148,19 +152,21 @@ ui <- fluidPage(
       # output the phrase net
       visNetworkOutput(outputId = "phrasenet"),
       # text output for the sentences containing the selected edge
-      textOutput(outputId = "text")
+      htmlOutput(outputId = "text")
     )
   )
 )
 
 server <- function(input, output) {
+  
   text <- reactiveVal()
   # observe the file input and change the text accordingly
   observeEvent(input$file, {
     text(read_lines(input$file$datapath))
   })
+  
   connectors <- reactiveVal()
-  # observe the connectors input and react accordingly
+  # observe the connectors input and change the connectors accordingly
   observeEvent(input$connectors, {
     connector_text <- input$connectors
     # vector of connector words
@@ -169,12 +175,43 @@ server <- function(input, output) {
     connector_words <- gsub(" ", "", connector_words)
     connectors(connector_words)
   })
+  
+  # edge data obtained from phraseNet function
+  edge_data <- reactiveVal()
+  
   # output the phrasenet
   output$phrasenet <- renderVisNetwork({
-    phraseNet(text(), connectors())
+    # get the nodes and edges for the graph, using the text and connectors
+    graph_data <- phraseNet(text(), connectors())
+    # change the edge data for use in text output
+    edge_data(graph_data$edges)
+    # draw the graph and associate a click event with the edges
+    visNetwork(graph_data$nodes, graph_data$edges) %>%
+      visEvents(selectEdge = "function(edges) {
+        Shiny.onInputChange('current_edge_id', edges);
+      ;}")
+  })
+  
+  # output the relevant lines using the text output
+  output$text <- renderUI({
+    # get the id of the selected edge
+    edge_id <- input$current_edge_id$edges[[1]]
+    # get the from and to words of the selected edge
+    edge <- edge_data() %>% 
+      filter(id == edge_id)
+    from <- edge$from
+    to <- edge$to
+    # get the word combinations using the from, to and connectors
+    word_combinations <- paste(from, connectors(), to)
+    # get the output lines for each word combination
+    HTML(paste(unlist(sapply(word_combinations, grep, x = text(), ignore.case = TRUE, value = TRUE)), collapse = "<br>"))
   })
 }
 
 # Run the application 
 shinyApp(ui, server)
 ```
+
+## Acknowledgements
+
+The code for creating the phrase network is taken and modified from the R script "phraseNet.R" given in the LiU course 732A98 webpage: https://www.ida.liu.se/~732A98/info/materials.en.shtml
